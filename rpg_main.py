@@ -1,131 +1,138 @@
-import pandas as pd
+import sqlite3
 import os
-import math
-
-# use stats from elden ring
-COLUMNS = ['name', 'level', 'vigor', 'mind', 'endurance', 'strength', 'dexterity', 'intelligence', 'faith', 'arcane']
-EQUIPMENT_COLUMNS = ['weapon', 'armor', 'accessory']
 
 def setup(server_id):
-    # setup database for server that is used to track player data using pandas
     server_path = os.path.join('data', server_id)
     if os.path.exists(server_path):
-        print('Database already exists for server:', server_id)
+        print("Database already exists for server:", server_id)
         return
     
-    # create folder for server
     os.makedirs(server_path)
     
-    dataframe = pd.DataFrame(columns=COLUMNS + EQUIPMENT_COLUMNS)
+    database_file = os.path.join(server_path, 'players.db')
+    conn = sqlite3.connect(database_file)
+    cursor = conn.cursor()
     
-    # Initialize derived columns with default values
-    dataframe['max_stamina'] = 0
-    dataframe['max_hp'] = 0
-    dataframe['max_fp'] = 0
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS players (
+        server_id TEXT,
+        name TEXT,
+        level INTEGER,
+        vigor INTEGER,
+        mind INTEGER,
+        endurance INTEGER,
+        strength INTEGER,
+        dexterity INTEGER,
+        intelligence INTEGER,
+        faith INTEGER,
+        arcane INTEGER,
+        weapon TEXT,
+        armor TEXT,
+        accessory TEXT,
+        max_stamina INTEGER,
+        max_hp INTEGER,
+        max_fp INTEGER,
+        PRIMARY KEY (server_id, name)
+    )
+    ''')
     
-    # Initialize equipment columns with default values
-    dataframe['weapon'] = ''
-    dataframe['armor'] = ''
-    dataframe['accessory'] = ''
+    conn.commit()
+    conn.close()
     
-    # save dataframe to csv
-    save_dataframe(server_path, dataframe)
-    
-    print('Database created for server:', server_id)
-    print('Database saved to:', os.path.join(server_path, 'players.csv'))
+    print('Database setup complete for server:', server_id)
 
-def load_player_data(server_id):
-    server_path = os.path.join('data', server_id)
-    if not os.path.exists(server_path):
-        print('Database does not exist for server:', server_id)
-        return None, None
-    
-    dataframe = pd.read_csv(os.path.join(server_path, 'players.csv'))
-    return server_path, dataframe
-
-def player_exists(dataframe, player_name):
-    return player_name in dataframe['name'].values
-
-def save_dataframe(server_path, dataframe):
-    dataframe.to_csv(os.path.join(server_path, 'players.csv'), index=False)
+def get_database_file(server_id):
+    return os.path.join('data', server_id, 'players.db')
 
 def add_player(server_id, player_name, level, vigor, mind, endurance, strength, dexterity, intelligence, faith, arcane):
-    # add player to database
-    server_path, dataframe = load_player_data(server_id)
-    if dataframe is None:
-        return
+    database_file = get_database_file(server_id)
+    conn = sqlite3.connect(database_file)
+    cursor = conn.cursor()
     
-    # check if player already exists
-    if player_exists(dataframe, player_name):
+    cursor.execute('SELECT * FROM players WHERE server_id = ? AND name = ?', (server_id, player_name))
+    if cursor.fetchone():
         print('Player already exists in database:', player_name)
+        conn.close()
         return
     
-    new_player = pd.DataFrame([[player_name, level, vigor, mind, endurance, strength, dexterity, intelligence, faith, arcane, '', '', '']], columns=COLUMNS + EQUIPMENT_COLUMNS)
+    max_stamina = 80 + 25 * ((endurance - 1.0) / 14)
+    max_hp = 300 + 500 * (((vigor - 1.0) / 24) ** 1.5)
+    max_fp = 50 + 45 * ((mind - 1.0) / 14)
     
-    # Calculate derived columns
-    new_player['max_stamina'] = math.floor(80 + 25 * ((endurance - 1.0) / 14))
-    new_player['max_hp'] = math.floor(300 + 500 * (((vigor - 1.0) / 24) ** 1.5))
-    new_player['max_fp'] = math.floor(50 + 45 * ((mind - 1.0) / 14))
+    cursor.execute('''
+    INSERT INTO players (server_id, name, level, vigor, mind, endurance, strength, dexterity, intelligence, faith, arcane, weapon, armor, accessory, max_stamina, max_hp, max_fp)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (server_id, player_name, level, vigor, mind, endurance, strength, dexterity, intelligence, faith, arcane, '', '', '', max_stamina, max_hp, max_fp))
     
-    dataframe = pd.concat([dataframe, new_player], ignore_index=True)
-    
-    # save dataframe to csv
-    save_dataframe(server_path, dataframe)
+    conn.commit()
+    conn.close()
     
     print('Player added to database:', player_name)
 
 def remove_player(server_id, player_name):
-    # remove player from database
-    server_path, dataframe = load_player_data(server_id)
-    if dataframe is None:
-        return
+    database_file = get_database_file(server_id)
+    conn = sqlite3.connect(database_file)
+    cursor = conn.cursor()
     
-    # check if player exists
-    if not player_exists(dataframe, player_name):
-        print('Player does not exist in database:', player_name)
-        return
+    cursor.execute('DELETE FROM players WHERE server_id = ? AND name = ?', (server_id, player_name))
     
-    dataframe = dataframe[dataframe['name'] != player_name]
-    
-    # save dataframe to csv
-    save_dataframe(server_path, dataframe)
+    conn.commit()
+    conn.close()
     
     print('Player removed from database:', player_name)
 
 def add_equipment(server_id, player_name, equipment_type, equipment_name):
-    # add equipment to player
-    server_path, dataframe = load_player_data(server_id)
-    if dataframe is None:
-        return
+    database_file = get_database_file(server_id)
+    conn = sqlite3.connect(database_file)
+    cursor = conn.cursor()
     
-    # check if player exists
-    if not player_exists(dataframe, player_name):
+    cursor.execute('SELECT * FROM players WHERE server_id = ? AND name = ?', (server_id, player_name))
+    if not cursor.fetchone():
         print('Player does not exist in database:', player_name)
+        conn.close()
         return
     
-    # update equipment
-    dataframe.loc[dataframe['name'] == player_name, equipment_type] = equipment_name
+    cursor.execute(f'UPDATE players SET {equipment_type} = ? WHERE server_id = ? AND name = ?', (equipment_name, server_id, player_name))
     
-    # save dataframe to csv
-    save_dataframe(server_path, dataframe)
+    conn.commit()
+    conn.close()
     
     print(f'Equipment {equipment_name} added to player {player_name} in slot {equipment_type}')
 
 def remove_equipment(server_id, player_name, equipment_type):
-    # remove equipment from player
-    server_path, dataframe = load_player_data(server_id)
-    if dataframe is None:
-        return
+    database_file = get_database_file(server_id)
+    conn = sqlite3.connect(database_file)
+    cursor = conn.cursor()
     
-    # check if player exists
-    if not player_exists(dataframe, player_name):
+    cursor.execute('SELECT * FROM players WHERE server_id = ? AND name = ?', (server_id, player_name))
+    if not cursor.fetchone():
         print('Player does not exist in database:', player_name)
+        conn.close()
         return
     
-    # remove equipment
-    dataframe.loc[dataframe['name'] == player_name, equipment_type] = ''
+    cursor.execute(f'UPDATE players SET {equipment_type} = ? WHERE server_id = ? AND name = ?', ('', server_id, player_name))
     
-    # save dataframe to csv
-    save_dataframe(server_path, dataframe)
+    conn.commit()
+    conn.close()
     
     print(f'Equipment removed from player {player_name} in slot {equipment_type}')
+    
+
+def get_database_file(server_id):
+    return os.path.join('data', server_id, 'players.db')
+
+def get_player(server_id, player_name):
+    database_file = get_database_file(server_id)
+    conn = sqlite3.connect(database_file)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT * FROM players WHERE server_id = ? AND name = ?', (server_id, player_name))
+    player = cursor.fetchone()
+    
+    conn.close()
+    
+    if player:
+        keys = ['server_id', 'name', 'level', 'vigor', 'mind', 'endurance', 'strength', 'dexterity', 'intelligence', 'faith', 'arcane', 'weapon', 'armor', 'accessory', 'max_stamina', 'max_hp', 'max_fp']
+        return dict(zip(keys, player))
+    else:
+        return None
